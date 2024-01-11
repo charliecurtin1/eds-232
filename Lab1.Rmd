@@ -35,30 +35,25 @@ glimpse(dat)
 ```
 
 ```{r}
-
 # Clean names to the snake_case convention
-
 pumpkins <- dat %>% clean_names(case = "snake")
 
 # Return column names
-
 pumpkins %>% names()
 ```
 
 ## Select desired columns
 
 ```{r}
+# select desired columns
 pumpkins <- pumpkins %>% select(variety, city_name, package, low_price, high_price, date)
-
 
 ## Print data set
 pumpkins %>% slice_head(n = 5)
 ```
 
 ```{r}
-
 ## Load lubridate
-
 library(lubridate)
 
 # Extract the month and day from the dates and add as new columns
@@ -66,12 +61,12 @@ pumpkins <- pumpkins %>%
   mutate(date = mdy(date),  
          day = yday(date),
          month = month(date))
+
+# drop the day column
 pumpkins %>% 
   select(-day)
 
-
 ## View the first few rows
-
 pumpkins %>% slice_head(n = 7)
 ```
 
@@ -80,7 +75,7 @@ There are two column dealing with price, high and low. Let's combine them into a
 ```{r}
 # Create a new column price
 pumpkins <- pumpkins %>% 
-  mutate(price = (low_price+ high_price)/2)
+  mutate(price = (low_price + high_price) / 2)
 ```
 
 Let's take a look at pumpkins sales throughout the year.
@@ -88,8 +83,14 @@ Let's take a look at pumpkins sales throughout the year.
 *Question 1:* Create a scatter plot using price on the y-axis and day on the x-axis.
 
 ```{r}
-
-# Make a scatter plot of month and price
+# Make a scatter plot of day and price
+pumpkins %>% ggplot(aes(x = day,
+                        y = price)) +
+  geom_point(color = "darkorange") +
+  theme_bw() +
+  labs(title = "US Pumpkin Sales",
+       x = "day of the year",
+       y = "price ($)")
 
 ```
 
@@ -109,7 +110,6 @@ Pumpkins seem to be very hard to weigh consistently, so let's filter them by sel
 
 ```{r}
 ## View the first few rows of the data
-
 pumpkins %>% slice_head(n = 5)
 
 pumpkins %>% distinct(package)
@@ -119,8 +119,8 @@ pumpkins %>% distinct(package)
 
 ```{r}
 # Retain only pumpkins with "bushel" in the package column
-
-
+new_pumpkins <- pumpkins %>% 
+  filter(str_detect(package, "bushel")) # filter with string detect, looking for any rows that contain the string "bushel"
 ```
 
 ```{r}
@@ -141,12 +141,12 @@ Did you notice that the bushel amount varies per row? You need to normalize the 
 We'll use the function case_when() to mutate the Price column depending on some conditions. case_when() allows you to vectorize multiple if_else()statements.
 
 ```{r}
-# Convert the price if the Package contains fractional bushel values
+# Convert the price if the Package contains fractional bushel values to return price per bushel
 new_pumpkins <- new_pumpkins %>% 
   mutate(price = case_when(
-    str_detect(package, "1 1/9") ~ price/(1.1),
-    str_detect(package, "1/2") ~ price*2,
-    TRUE ~ price))
+    str_detect(package, "1 1/9") ~ price / (1.1),
+    str_detect(package, "1/2") ~ price * 2,
+    TRUE ~ price)) # retains values in rows without fractional bushels
 
 # View the first few rows of the data
 new_pumpkins %>% 
@@ -156,17 +156,20 @@ new_pumpkins %>%
 ## Data Visualization
 
 ```{r}
-
 # Set theme
 theme_set(theme_light())
 
 # Make a scatter plot of day and price
 new_pumpkins %>% 
-  ggplot(mapping = aes(x = day, y = price)) +
-  geom_point(size = 1.6)
+  ggplot(mapping = aes(x = day, 
+                       y = price)) +
+  geom_point(size = 1.6,
+             color = "darkorange")
 ```
 
 *Question 3:* Is this a useful plot? Does anything about it surprise you?
+
+- Our data appear to have two distinct groups where price falls under 25 dollars per bushel and around $75 dollars per bushel. Additionally, pumpkins seem to be sold mostly on certain days of the year, with distinct regular gaps between sales.
 
 How do we make it more useful? To get charts to display useful data, you usually need to group the data somehow.
 
@@ -175,21 +178,18 @@ How do we make it more useful? To get charts to display useful data, you usually
 Hint: use dplyr::group_by() %\>% summarize()
 
 ```{r}
-# Find the average price of pumpkins per month
-
-```
-
-```{r}
 # Find the average price of pumpkins per month then plot a bar chart
-pumpkins %>%
+new_pumpkins %>%
   group_by(month) %>% 
-  summarise(mean_price = mean(price)) %>% 
-  ggplot(aes(x = month, y = mean_price)) +
+  summarize(mean_price = mean(price)) %>% 
+  ggplot(aes(x = as_factor(month), y = mean_price)) +
   geom_col(fill = "midnightblue", alpha = 0.7) +
-  ylab("Pumpkin Price")
+  labs(y = "price ($)",
+       x = "month",
+       title = "Average Pumpkin Sale Price by Month")
 ```
 
-#Preprocessing data for modelling using recipes
+# Preprocessing data for modelling using recipes
 
 What if we wanted to predict the price of a pumpkin based on the city or package columns which are of type character? How could we find the correlation between, say, package and price?
 
@@ -199,15 +199,14 @@ This means that we have to find a way to reformat our predictors to make them ea
 
 Different models have different preprocessing requirements. For instance, least squares requires encoding categorical variables such as month, variety and city_name. This simply involves translating a column with categorical values into one or more numeric columns that take the place of the original.
 
-Now let's introduce another useful tidymodels package: recipes - which will help you preprocess data before training your mode. A recipe is an object that defines what steps should be applied to a data set in order to get it ready for modelling.
+Now let's introduce another useful tidymodels package: recipes - which will help you preprocess data before training your model. A recipe is an object that defines what steps should be applied to a data set in order to get it ready for modelling.
 
 Now, let's create a recipe that prepares our data for modelling by substituting a unique integer for all the observations in the predictor columns:
 
 ```{r}
 # Specify a recipe
-pumpkins_recipe <- recipe(price ~ ., data = new_pumpkins) %>% 
-  step_integer(all_predictors(), zero_based = TRUE)
-
+pumpkins_recipe <- recipe(price ~ ., data = new_pumpkins) %>% # create a recipe that predicts price (outcome variable) using all other variables
+  step_integer(all_predictors(), zero_based = TRUE) # take all other predictors 
 
 # Print out the recipe
 pumpkins_recipe
@@ -233,6 +232,8 @@ Now let's prep and bake our recipes to confirm that under the hood, the predicto
 # Prep the recipe
 pumpkins_prep <- prep(pumpkins_recipe)
 
+print(pumpkins_prep)
+
 # Bake the recipe to extract a preprocessed new_pumpkins data
 baked_pumpkins <- bake(pumpkins_prep, new_data = NULL)
 
@@ -245,6 +246,12 @@ The processed data baked_pumpkins has all its predictors encoded confirming that
 
 *Question 5:* From looking at the baked_pumpkins tibble, how many total cities are represented in the data set?
 
+```{r}
+length(unique(baked_pumpkins$city_name))
+```
+
+- There are 10 total cities represented in the data set
+
 baked_pumpkins is a data frame that we can perform computations on. For instance, let's try to find a good correlation between two variables to potentially build a good predictive model. We'll use the function cor() to do this.
 
 ```{r}
@@ -255,7 +262,7 @@ cor(baked_pumpkins$package, baked_pumpkins$price)
 *Question 6:* Calculate the correlation between pumpkin price and two other variables in the data set
 
 ```{r}
-#Correlation between price and other vars.
+# Correlation between price and other vars.
 
 ```
 
