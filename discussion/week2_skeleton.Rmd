@@ -53,7 +53,7 @@ We are going to load the data and only use two categories (demersal - i.e., bott
 Additionally, we are going to binary encode these values. This means turning them into a 0 and 1. 
 
 ```{r}
-
+# load in the data, filter for habitat is demersal or habitat is reef-associated, binary encode the habitat types
 fish_clean = read_csv(here("discussion", "data", "fish_clean.csv")) %>% 
   filter(habitat == "demersal" | habitat == "reef-associated") %>% 
   mutate(habitat = case_when(
@@ -71,12 +71,12 @@ Now I will look at the distribution of variables that did not have missing value
 
 ```{r, fig.cap="Figure 10. counts of each habitat type represented in the fish dataset"}
 
-ggplot(fish_clean, aes(habitat)) + #order by count
-  geom_bar() + #get counts
-  theme_bw() + #bw theme
+ggplot(fish_clean, aes(as_factor(habitat))) + # order by count
+  geom_bar(fill = "cornflowerblue") + # get counts
+  theme_bw() + # bw theme
   labs(x = "Habitat",
-       y = "Count") + #change labels
-  theme(axis.text.x = element_text(angle = 30, hjust=1)) #rotate x axis labels
+       y = "Count") + # change labels
+  theme(axis.text.x = element_text(angle = 30, hjust =1 )) # rotate x axis labels
 ```
 
 #### Correlations
@@ -114,10 +114,14 @@ Here, we will use functions from the `rsample` package within `TidyModels`
 
 
 ```{r}
- #split data stratified by survived
+# split data stratified by survived
+data_split <- initial_split(fish_clean, prop = .8, strata = habitat)
 
- #get training data
- #get testing data
+# get training data
+train <- training(data_split)
+
+# get testing data
+test <- testing(data_split)
 
 head(train)
 head(test)
@@ -135,7 +139,10 @@ After splitting my data, the first step is to create a recipe indicating the for
 I will be predicted habitat based on trophic level, length, minimum depth, maximum depth, vulnerability, body shape, and food source type. We will be normalizing all numeric predictors
 
 ```{r}
+fish_recipe <- recipe(habitat ~ shape_impute + food_impute + shallow_impute + deep_impute + vulnerability + length_impute + trophic_level_impute, data = train) %>% 
+  step_normalize(all_numeric_predictors())
 
+fish_recipe
 ```
 
 #### Model 1: Linear Regression
@@ -148,13 +155,22 @@ The model specifications in `TidyModels` are within the `parsnip` package
 
 
 ```{r}
+lm_model <- linear_reg() %>% # set linear regression model
+  set_engine("lm") %>% # use lm engine
+  set_mode("regression") # set mode as regression
 
+lm_model
 ```
 
 After specifiying the model, we can create a workflow from the `workflows` package
 
 ```{r}
+lm_workflow <- workflow() %>% 
+  add_recipe(fish_recipe) %>% 
+  add_model(lm_model)
 
+lm_workflow
+  
 ```
 
 
@@ -175,15 +191,21 @@ Now we will "fit" the model, again using `parsnip`.
 ```{r, eval = FALSE}
 
 
+train_fit <- fit(lm_workflow, train)
+
 train_fit
 ```
 
 ```{r}
+train_predict <- predict(object = train_fit, new_data = train) %>% 
+  bind_cols(train)
 
+head(train_predict)
 ```
 
 ```{r}
-
+test_predict <- predict(object = train_fit, new_data = test) %>% 
+  bind_cols(test)
 
 head(test_predict)
 ```
@@ -193,7 +215,15 @@ head(test_predict)
 Finally, we will calulate some metrics for preformance, using the `yardstick` package.
 
 ```{r}
+train_metrics <- train_predict %>% 
+  metrics(habitat, .pred)
 
+train_metrics
+
+test_metrics <- test_predict %>% 
+  metrics(habitat, .pred)
+
+test_metrics
 ```
 
 
