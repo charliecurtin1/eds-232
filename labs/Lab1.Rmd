@@ -31,6 +31,7 @@ Should I buy them in half-bushel baskets or by the 1 1/9 bushel box?
 ## Examine the data
 
 ```{r data}
+# get a transposed view of the dataset
 glimpse(dat)
 ```
 
@@ -169,7 +170,7 @@ new_pumpkins %>%
 
 *Question 3:* Is this a useful plot? Does anything about it surprise you?
 
-- Our data appear to have two distinct groups where price falls under 25 dollars per bushel and around $75 dollars per bushel. Additionally, pumpkins seem to be sold mostly on certain days of the year, with distinct regular gaps between sales.
+- Our data appear to have two distinct groups where bushel sale price falls around 15-20 dollars per bushel and around 30-40 dollars per bushel. Additionally, pumpkins seem to be sold mostly on certain days of the year, with distinct regular gaps between sales.
 
 How do we make it more useful? To get charts to display useful data, you usually need to group the data somehow.
 
@@ -178,7 +179,7 @@ How do we make it more useful? To get charts to display useful data, you usually
 Hint: use dplyr::group_by() %\>% summarize()
 
 ```{r}
-# Find the average price of pumpkins per month then plot a bar chart
+# Find the average sale price of a bushel of pumpkins per month then plot a bar chart
 new_pumpkins %>%
   group_by(month) %>% 
   summarize(mean_price = mean(price)) %>% 
@@ -186,7 +187,7 @@ new_pumpkins %>%
   geom_col(fill = "midnightblue", alpha = 0.7) +
   labs(y = "price ($)",
        x = "month",
-       title = "Average Pumpkin Sale Price by Month")
+       title = "Average Bushel of Pumpkins Sale Price by Month")
 ```
 
 # Preprocessing data for modelling using recipes
@@ -256,17 +257,25 @@ baked_pumpkins is a data frame that we can perform computations on. For instance
 
 ```{r}
 # Find the correlation between the package and the price
-cor(baked_pumpkins$package, baked_pumpkins$price)
+print(cor(baked_pumpkins$package, baked_pumpkins$price))
 ```
 
 *Question 6:* Calculate the correlation between pumpkin price and two other variables in the data set
 
 ```{r}
-# Correlation between price and other vars.
+# find the correlation between variety and price
+print(cor(baked_pumpkins$variety, baked_pumpkins$price))
 
+# find the correlation between day of the month and price
+print(cor(baked_pumpkins$day, baked_pumpkins$price))
+
+# find order of pumpkin variety factor
+print(levels(as.factor(new_pumpkins$variety)))
 ```
 
 *Question 7:* Which of these three variables is most highly correlated with price? Why might this be?
+
+- Variety is very highly negatively correlated with pumpkin price. As the value for variety decreases, the pumpkin price increases. The variety is in order as "FAIRYTALE", "MINIATURE", "MIXED HEIRLOOM VARIETIES", and "PIE TYPE". Since it's encoded numerically beginning with "FAIRYTALE" as 0, this likely means that "fairytale" pumpkins are the most expensive per bushel. 
 
 Now let's visualize a correlation matrix of all the columns using the corrplot package.
 
@@ -286,7 +295,7 @@ corrplot(corr_mat, method = "shade", shade.col = NA, tl.col = "black", tl.srt = 
 
 ## Build a linear regression model
 
-Now that we have build a recipe, and actually confirmed that the data will be pre-processed appropriately, let's now build a regression model to answer the question: What price can I expect of a given pumpkin package?
+Now that we have built a recipe, and actually confirmed that the data will be pre-processed appropriately, let's now build a regression model to answer the question: What price can I expect of a given pumpkin package?
 
 ## Train the model using the training set
 
@@ -296,6 +305,7 @@ To do this, we'll first split the data. Data splitting is a key part of the mach
 
 ```{r}
 set.seed(123)
+
 # Split the data into training and test sets
 pumpkins_split <- new_pumpkins %>% 
   initial_split(prop = 0.8)
@@ -416,5 +426,7 @@ plot_results %>%
 Hmm. The model does not do good job of generalizing the relationship between a package and its corresponding price.
 
 *Question 8:* What issues do you see with fitting a linear regression to this data?
+
+- It seems that the model we estimated is not complex enough and is underfitting our test data, leading to high bias and low variance. We estimated pumpkin price on a number of encoded categorical features, while a linear regression might be better served to create predictions on continuous features. 
 
 Congratulations, you just created a model that can help predict the price of a few varieties of pumpkins. But you can probably create a better model! To be continued next week...
