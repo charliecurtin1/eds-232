@@ -8,6 +8,13 @@ editor_options:
     wrap: 72
 ---
 
+```{r, include = FALSE}
+# for outputs from Lab 1
+library(knitr)
+source(knitr::purl("~/Documents/MEDS/Courses/EDS-232/eds-232/labs/Lab1.Rmd"))
+```
+
+
 Today we will be continuing the pumpkin case study from last week. We
 will be using the data that you cleaned and split last time
 (pumpkins_train) and will be comparing our results today to those you
@@ -129,9 +136,9 @@ poly_results %>% ggplot() +
   geom_point(aes(x = package_integer, y = price)) +
   geom_line(aes(x = package_integer, y = .pred),
             color = "darkorange") +
-  labs(x = "encoded integer",
+  labs(x = "encoded package type",
        y = "pumpkin price",
-       title = "") +
+       title = "Linear model predicting pumpkin price by package type") +
   theme_bw()
 
 ```
@@ -153,9 +160,9 @@ poly_results %>% ggplot() +
               color = "midnightblue",
               size = 1.2,
               se = FALSE) +
-  labs(x = "encoded integer",
+  labs(x = "encoded package type",
        y = "pumpkin price",
-       title = "") +
+       title = "Polynomial model predicting pumpkin price by package type") +
   theme_bw()
 ```
 
@@ -171,6 +178,72 @@ workflow - Create a model by fitting the workflow - Evaluate model
 performance on the test data - Create a visualization of model
 performance
 
--   start with new_pumpkins dataframe
+### Predicting sales price based on month of the year sold
+
+```{r}
+# Find the correlation between the package and the price
+print(cor(new_pumpkins$month, new_pumpkins$price))
+```
+
+
+```{r}
+set.seed(123)
+
+# Split the data into training and test sets
+pumpkins_split <- new_pumpkins %>% 
+  initial_split(prop = 0.8)
+
+# Extract training and test data
+pumpkins_train <- training(pumpkins_split)
+pumpkins_test <- testing(pumpkins_split)
+
+# Create a recipe for preprocessing the data, specifying a polynomial
+pump_month_recipe <- recipe(price ~ month, data = pumpkins_train) %>% 
+  step_poly(all_predictors(), degree = 4)
+
+# Create a model
+poly_month_spec <- linear_reg() %>% 
+  set_engine("lm") %>% 
+  set_mode("regression")
+
+# Bundle recipe and model spec into a workflow
+poly_month_wf <- workflow() %>% 
+  add_recipe(pump_month_recipe) %>% 
+  add_model(poly_month_spec)
+
+# Create a model
+poly_month_wf_fit <- poly_month_wf %>% 
+  fit(data = pumpkins_train)
+
+# Make price predictions on test data
+poly_month_results <- poly_month_wf_fit %>% 
+  predict(new_data = pumpkins_test) %>% 
+  bind_cols(pumpkins_test %>% select(c(month, price))) %>% 
+  relocate(.pred, .after = last_col())
+
+# Evaluate performance of linear regression
+metrics(data = poly_month_results,
+        truth = price,
+        estimate = .pred)
+```
+- According to the root-mean squared error, on average, our predictions of price are off by $9.64.
+
+```{r}
+# visualize model results
+poly_month_results %>% ggplot() +
+  geom_point(aes(x = month, y = price)) +
+  geom_smooth(aes(x = month, y = .pred),
+              method = "lm",
+              formula = y ~ poly(x, degree = 3),
+              color = "midnightblue",
+              size = 1.2,
+              se = FALSE) +
+  labs(x = "month",
+       y = "pumpkin price",
+       title = "Polynomial model predicting pumpkin price by month") +
+  theme_bw()
+```
+
+- Our model doesn't perform very well, appearing to underfit our data, leading to the high RMSE. 
 
 Lab 2 due 1/24 at 11:59 PM

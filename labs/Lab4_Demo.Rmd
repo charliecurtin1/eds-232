@@ -1,0 +1,101 @@
+---
+title: "Lab4_Demo"
+author: "Mateo Robbins"
+date: "2024-01-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)     # for data wrangling
+library(ggplot2)   # for awesome plotting
+library(rsample)   # for data splitting
+library(recipes)   # data preprocessing
+library(caret)     # for logistic regression modeling
+```
+Let's explore how employee income and overtime hours worked affect likelihood of employee attrition.  Any predictions?
+
+```{r}
+#
+data("attrition", package = "modeldata")
+
+df <- attrition %>% mutate_if(is.ordered, factor, ordered = FALSE)
+
+# Create training (70%) and test (30%) sets for the 
+# rsample::attrition data.
+set.seed(123)  # for reproducibility 
+churn_split <- initial_split(df, prop = .7)
+churn_train <- training(churn_split)
+churn_test  <- testing(churn_split)
+```
+
+Let's set up set up our recipes now for preprocessing. 
+```{r recipe}
+#specify and prep recipe
+churn_rec <- recipe(Attrition ~ ., data = churn_train) %>% 
+  # binary encode Attrition, our outcome variable
+  step_integer(Attrition, zero_based = TRUE) %>% 
+  prep(churn_train)
+
+#bake recipe with training data
+churn_baked_train <- bake(churn_rec, new_data = churn_train)
+```
+
+```{r specify_models_glm}
+#MonthlyIncome
+# family = "binomial" since our target variable is binary
+model_inc <- glm(data = churn_baked_train, Attrition ~ MonthlyIncome, family = "binomial")
+  
+#OverTime
+model_time <- glm(data = churn_baked_train, Attrition ~ OverTime, family = "binomial")
+```
+
+
+```{r tidy_model_objs}
+broom::tidy(model_inc)
+broom::tidy(model_time)
+
+```
+
+```{r exp_coefs}
+#exponentiate the coefficients from model objects for interpretation. Gives us changes in odds of attrition
+# the odds of an employee attriting increase by .99 for every 1 additional dollar they make per month (so it's actually going down)
+exp(coef(model_inc))
+
+# if an employee works overtime, their odds of attriting increase multiplicatively by 3.48
+exp(coef(model_time))
+
+```
+
+
+```{r recode_attrition_test}
+# testing the generalization with our model
+churn_baked_test <- bake(churn_rec, new_data = churn_test)
+```
+
+```{r plot_income_attrition}
+ggplot(churn_baked_test, aes(x = MonthlyIncome, y = Attrition)) +
+  geom_point() +
+  stat_smooth(method = "glm", se = TRUE, method.args = list(family = binomial))
+
+```
+
+We can add more predictors, creating a multiple logistic regression model
+
+```{r mult_log_regression}
+# train our model with both predictors
+model_both <- glm(Attrition ~ MonthlyIncome + OverTime, data = churn_train, family = "binomial")
+
+# tidy model
+broom::tidy(model_both)
+```
+
+
+```{r}
+# plot 
+ggplot(churn_baked_test, aes(x = MonthlyIncome, y = Attrition, color = OverTime)) +
+  geom_point() +
+  stat_smooth(method = "glm", se = FALSE, method.args = list(family = binomial)) +
+  theme_bw()
+```
+
