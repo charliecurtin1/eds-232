@@ -1,0 +1,174 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+### Ridge regression
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidymodels)
+library(spData)
+library(ggpmisc)
+```
+
+```{r}
+redlining = read_csv(here::here("discussion", "data", "redlining.csv")) %>% 
+  left_join(us_states_df %>% rename(name = state)) %>% 
+  janitor::clean_names()
+```
+
+```{r}
+# looking for a correlation between our outcome and a predictor
+# exploratory viz
+ggplot(redlining) +
+  geom_point(aes(poverty_level_10, percent))
+
+# median income
+ggplot(redlining) +
+  geom_point(aes(median_income_10, percent))
+```
+
+#### Data splitting
+```{r}
+# initialize split
+split <- initial_split(redlining, prop = .7)
+
+# extract training and testing data
+train <- training(split)
+test <- testing(split)
+
+# cross-validation
+folds <- vfold_cv(train, v = 5, repeats = 2)
+
+# recipe
+recipe <- recipe(percent ~ region + area + total_pop_10 + median_income_10 + poverty_level_10, data = train) %>%
+  step_normalize(all_numeric_predictors()) %>% 
+  step_integer(all_nominal_predictors()) %>% 
+  # interactions within recipes
+  step_interact(terms = ~total_pop_10:median_income_10) %>% 
+  step_interact(terms = ~total_pop_10:poverty_level_10) %>% 
+  step_interact(terms = ~poverty_level_10:median_income_10) 
+```
+
+### Recipe Specification
+
+```{r}
+# recipe
+recipe <- recipe(percent ~ region + area + total_pop_10 + median_income_10 + poverty_level_10, data = train) %>%
+  step_normalize(all_numeric_predictors()) %>% 
+  step_integer(all_nominal_predictors()) %>% 
+  # interactions within recipes
+  step_interact(terms = ~total_pop_10:median_income_10) %>% 
+  step_interact(terms = ~total_pop_10:poverty_level_10) %>% 
+  step_interact(terms = ~poverty_level_10:median_income_10) 
+```
+
+### Model: Tuned Linear Regression
+
+```{r}
+lm_model <- linear_reg(penalty = tune(), mixture = tune()) %>% 
+  # use tune to tune parameters 
+  set_engine("glmnet") %>% 
+  set_mode("regression")
+```
+
+```{r}
+# workflow
+lm_w <- workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(recipe)
+
+```
+
+```{r}
+# model tuning via grid search
+?tune_grid
+```
+
+```{r, eval = FALSE}
+# grid search model tuning
+lm_cv_tune <- lm_w %>% 
+  tune_grid(resamples = folds, grid = 5)
+
+# collect metrics from tune
+collect_metrics(lm_cv_tune)
+```
+
+```{r}
+?collect_metrics #from tune
+```
+
+```{r}
+# identifying the best set of parameters
+autoplot(lm_cv_tune) +
+  theme_bw()
+```
+
+```{r}
+
+```
+
+#### Finalize workflow
+
+```{r}
+?show_best
+?finalize_workflow()
+```
+
+```{r}
+# extract the best model from our tuning
+lm_best <- show_best(lm_cv_tune, n = 1, metric = "rmse")
+
+lm_best
+
+# selecting our final model based on the tuned best model
+lm_final <- finalize_workflow(lm_w, select_best(lm_cv_tune, metric = "rmse"))
+
+lm_final
+```
+
+### Model Fitting
+
+```{r, include=FALSE}
+ # fit the data to the training data
+lm_fit <- fit(lm_final, train)
+```
+
+```{r, include=FALSE}
+# predict values for training set
+train_predict <- predict(lm_fit, train) %>% 
+  bind_cols(train)
+
+# predict values for testing set
+test_predict <- predict(lm_fit, test) %>% 
+  bind_cols(test)
+
+
+```
+
+```{r}
+# assessing metrics
+train_metrics <- train_predict %>% 
+  metrics(percent, .pred)
+
+test_metrics <- test_predict %>% 
+  metrics(percent, .pred)
+
+# print values
+print(train_metrics)
+print(test_metrics)
+```
+
+### Visualization
+
+```{r}
+# visualize predictions vs actual values
+ggplot(test_predict, aes(x = percent, y = .pred)) +
+  geom_point() +
+  stat_poly_line() +
+  stat_poly_eq(use_label("eq")) +
+  stat_poly_eq(label.y = .9)
+```
