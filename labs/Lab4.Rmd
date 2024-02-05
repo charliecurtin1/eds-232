@@ -12,6 +12,9 @@ library(skimr)
 library(tidymodels)
 library(caret)
 library(corrplot)
+library(broom)
+library(knitr)
+library(kableExtra)
 ```
 
 ## Lab 4: Fire and Tree Mortality
@@ -24,9 +27,11 @@ Outcome variable: *yr1status* = tree status (0=alive, 1=dead) assessed one year 
 
 Predictors: *YrFireName, Species, Genus_species, DBH_cm, CVS_percent, BCHM_m, BTL* (Information on these variables available in the database metadata ([link](https://www.fs.usda.gov/rds/archive/products/RDS-2020-0001-2/_metadata_RDS-2020-0001-2.html))).
 
-```{r}
+```{r, include = FALSE}
+# read in data
 trees_dat <- read_csv(file = "https://raw.githubusercontent.com/MaRo406/eds-232-machine-learning/main/data/trees-dat.csv")
 
+# view the structure of the data
 str(trees_dat)
 ```
 
@@ -34,9 +39,8 @@ str(trees_dat)
 
 ```{r}
 ## preprocessing ------
-# encode all string predictors to a zero_based integer
+# drop the ID column
 trees_dat <- trees_dat %>% 
-  # drop the ID column
   select(-"...1")
 
 # specify a recipe to with yr1status as our target variable and all others as predictors
@@ -77,19 +81,79 @@ Let's start our modeling effort with some simple models: one predictor and one o
 # create a correlation matrix
 m_trees <- cor(trees_train)
 corrplot(m_trees, method = c("number"), type = "upper")
-
 ```
 - The three predictors most highly correlated with yr1status are CVS_percent, BCHM_m, and DBH_cm
 
 > Question 5: Use glm() to fit three simple logistic regression models, one for each of the predictors you identified.
+
+```{r}
+# fit three different models with CVS_percent, BCHM_m, and DBH_cm -----
+model_cvs <- glm(data = trees_train, yr1status ~ CVS_percent, family = "binomial")
+
+model_bchm <- glm(data = trees_train, yr1status ~ BCHM_m, family = "binomial")
+
+model_dbh <- glm(data = trees_train, yr1status ~ DBH_cm, family = "binomial")
+
+
+# exponentiate coefficients -----
+cvs_coef <- exp(coef(model_cvs))
+
+bchm_coef <- exp(coef(model_bchm))
+
+dbh_coef <- exp(coef(model_dbh))
+
+
+# show results in a table -----
+# create a dataframe of coefficients
+exp_coef_df <- rbind(
+  data.frame(model = "CVS_percent", intercept = cvs_coef[1], 
+             B1 = cvs_coef[2]),
+  data.frame(model = "BCHM_m", intercept = bchm_coef[1], 
+             B1 = bchm_coef[2]),
+  data.frame(model = "DBH_cm", intercept = dbh_coef[1], 
+             B1 = dbh_coef[2])
+)
+
+
+# format results into a table
+glm_coef <- kable(exp_coef_df, format = "html", row.names = FALSE,
+                  caption = "Odds ratios for GLM models predicting tree mortality") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+glm_coef
+```
+
 
 ### Interpret the Coefficients 
 
 We aren't always interested in or able to interpret the model coefficients in a machine learning task. Often predictive accuracy is all we care about.
 
 > Question 6: That said, take a stab at interpreting our model coefficients now.
+
+- For CVS_percent, the intercept means that when CVS_percent is 0, the odds of a tree being alive increase multiplicatively by .001. The B1 coefficient means that when CVS_percent increases by 1 percentage point, the odds of a tree being alive increase multiplicatively by 1.08. For BCHM_m, the intercept means that when BCHM_m is 0, the odds of a tree being alive increase multiplicatively by .15. The B1 coefficient means that for each 1 meter increase in BCHM, the odds of a tree being alive increase multiplicatively by 1.23. For DBH_cm, the intercept means that when DBH_cm is 0, the odds of a tree being alive increase multiplicatively by 1.67. The B1 coefficient means that for each 1 cm increase in DBH, the odds of a tree being alive increase multiplicatively by .94. 
+
 >
 > Question 7: Now let's visualize the results from these models. Plot the fit to the training data of each model.
+
+```{r}
+# CVS percent
+ggplot(trees_train, aes(x = CVS_percent, y = yr1status)) +
+  geom_point() +
+  stat_smooth(method = "glm", se = TRUE, method.args = list(family = binomial))
+
+# DBH_cm
+ggplot(trees_train, aes(x = DBH_cm, y = yr1status)) +
+  geom_point() +
+  stat_smooth(method = "glm", se = TRUE, method.args = list(family = binomial))
+
+# BCHM_cm
+ggplot(trees_train, aes(x = BCHM_m, y = yr1status)) +
+  geom_point() +
+  stat_smooth(method = "glm", se = TRUE, method.args = list(family = binomial))
+
+# arrange plots on one plot
+```
+
 
 ### Multiple Logistic Regression
 
@@ -97,13 +161,43 @@ Let's not limit ourselves to a single-predictor model. More predictors might lea
 
 > Question 8: Use glm() to fit a multiple logistic regression called "logistic_full", with all three of the predictors included. Which of these are significant in the resulting model?
 
+```{r}
+# fit a multiple logistic regression on yr1status using our 3 predictors
+logistic_full <- glm(data = trees_train, yr1status ~ CVS_percent + BCHM_m + DBH_cm, family = "binomial")
+
+summary(logistic_full)
+```
+- All three predictors are signicant in our model with a p-value less than .001.
+
 ### Estimate Model Accuracy
 
 Now we want to estimate our model's generalizability using resampling.
 
 > Question 9: Use cross validation to assess model accuracy. Use caret::train() to fit four 10-fold cross-validated models (cv_model1, cv_model2, cv_model3, cv_model4) that correspond to each of the four models we've fit so far: three simple logistic regression models corresponding to each of the three key predictors (CVS_percent, DBH_cm, BCHM_m) and a multiple logistic regression model that combines all three predictors.
->
+
+```{r}
+# convert to a factor
+trees_train <- trees_train %>% 
+  mutate(yr1status = as.factor(yr1status))
+
+# estimate model generalizability
+control <- trainControl(method = "cv", number = 10)
+
+cvs_model1 <- caret::train(yr1status ~ CVS_percent, data = trees_train, method = "glm",
+                           family = "binomial", trControl = control)
+
+cvs_model2 <- caret::train(yr1status ~ BCHM_m, data = trees_train, method = "glm",
+                           family = "binomial", trControl = control)
+```
+
 > Question 10: Use caret::resamples() to extract then compare the classification accuracy for each model. (Hint: resamples() wont give you what you need unless you convert the outcome variable to factor form). Which model has the highest accuracy?
+
+```{r}
+resamps <- caret::resamples(list(cvs_model1, cvs_model2))
+
+summary(resamps)
+```
+
 
 Let's move forward with this single most accurate model.
 
