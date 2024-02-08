@@ -28,10 +28,6 @@ library(tidymodels)
 Client ID and Client Secret are required to create and access token that is required to interact with the API. You can set them as system values so we don't have to do provide them each time.
 
 ```{r access_API}
-
-Sys.setenv(SPOTIFY_CLIENT_ID = 'e4e7f9897b354299b562db238402752c') 
-Sys.setenv(SPOTIFY_CLIENT_SECRET = '7210f5cb01bd4cdba89952e69f4e3745')
-
 authorization_code <- get_spotify_authorization_code(scope = scopes()[c(1:19)]) #sets an authorization code that you'll need to provide for certain get_ functions via my_tracks <- get_my_saved_tracks(authorization = authorization_code)
 
 access_token <- get_spotify_access_token() #takes ID and SECRET, sends to Spotify and receives an access token
