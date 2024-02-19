@@ -52,31 +52,24 @@ op_music <- read_csv(here("labs", "data", "spotify_audio_features_op.csv"))
 ```{r}
 # create empty dataframe to store songs
 charlie_music <- data.frame()
-audio_features <- data.frame()
 
-
-## trying with saved tracks, actually works
-# get 300 saved tracks
+# retrieve music
 for (i in seq(0, 280, 20)) {
   music <- get_my_saved_tracks(authorization = authorization_code,
                                offset = i) # get music
-  features <- get_track_audio_features(ids = music$track.id) # then get audio features
-  # somehow get the track name into the audio features before rbind 
-  charlie_music <- rbind(charlie_music, features) %>% 
-    bind_cols(music$track.name)
+  charlie_music <- rbind(charlie_music, music) 
 }
 
-# converting music into audio features
-audio_features <- data.frame()
+# retrieve audio features
+features1 <- get_track_audio_features(charlie_music$track.id[1:100])
+features2 <- get_track_audio_features(charlie_music$track.id[101:200])
+features3 <- get_track_audio_features(charlie_music$track.id[201:300])
 
-for (id in list((1:100), (101:200), (201:300))) {
-  features <- get_track_audio_features(charlie_music$track.id[id])
-  charlie_features <- rbind(audio_features, features)
-}
+charlie_audio_features <- rbind(features1, features2, features3) %>% 
+  bind_cols(charlie_music$track.name)
 
-?range
+write_csv(charlie_audio_features, here("labs", "data", "charlie_audio_features.csv"))
 ```
-
 
 The Spotify API returns a dataframe of tracks and associated attributes. However, it will only return up to 50 (or 20) tracks at a time, so you will have to make multiple requests. Use a function to combine all your requests in one call.
 
@@ -99,6 +92,24 @@ Let's take a look at your data. Do some exploratory summary stats and visualizat
 
 For example: What are the most danceable tracks in your dataset? What are some differences in the data between users (Option 1) or genres (Option 2)?
 
+```{r, message = FALSE, warning = FALSE}
+## data cleaning and wrangling -----
+# read in Charlie and Oksana audio features and create binary variable 1 (charlie's music) or 0 (oksana's music)
+charlie <- read_csv(here("labs", "data", "charlie_audio_features.csv")) %>% 
+  mutate(owner = 1) %>% 
+  rename("track_name" = "...19")
+
+oksana <- read_csv(here("labs", "data", "spotify_audio_features_op.csv")) %>% 
+  mutate(owner = 0) 
+
+# bind the dataframes together, select variables of interest
+combined_music <- rbind(charlie, oksana) %>% 
+  select(-c(type, id, uri, track_href, analysis_url))
+
+## exploratory visualizations -----
+```
+
+
 ### **Modeling**
 
 Create competing models that predict whether a track belongs to:
@@ -109,14 +120,54 @@ Option 2. genre 1 or genre 2
 
 You will eventually create four final candidate models:
 
-1.  k-nearest neighbor (Week 5)
+#### Preprocessing
+
+```{r, message = FALSE, warning = FALSE}
+set.seed(389)
+
+# split data into training and testing set
+music_split <- initial_split(combined_music)
+music_train <- training(music_split)
+music_test <- testing(music_split)
+
+# specify our recipe
+# different recipe for k-nearest neighbors versus the others?
+# what to do about song name (character)?
+knn_rec <- recipe(owner ~ ., data = music_train) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  prep()
+
+baked_train <- bake(knn_rec, music_train)
+```
+
+#### K-nearest neighbor
+
+```{r}
+
+```
+
 2.  decision tree (Week 5)
+
+```{r}
+
+```
+
 3.  bagged tree (Week 6)
     -   bag_tree()
     -   Use the "times =" argument when setting the engine during model specification to specify the number of trees. The rule of thumb is that 50-500 trees is usually sufficient. The bottom of that range should be sufficient here.
+
+```{r}
+
+```
+
 4.  random forest (Week 6)
     -   rand_forest()
     -   m_try() is the new hyperparameter of interest for this type of model. Make sure to include it in your tuning process
+
+```{r}
+
+```
+
 
 Go through the modeling process for each model:
 
