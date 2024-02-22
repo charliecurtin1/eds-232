@@ -24,11 +24,15 @@ library(spotifyr) #API interaction
 library(tidyverse)
 library(tidymodels)
 library(here)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(baguette)
 ```
 
 Client ID and Client Secret are required to create and access token that is required to interact with the API. You can set them as system values so we don't have to do provide them each time.
 
-```{r access_API}
+```{r access_API, include = FALSE, eval = FALSE}
 authorization_code <- get_spotify_authorization_code(scope = scopes()[c(1:19)]) #sets an authorization code that you'll need to provide for certain get_ functions via my_tracks <- get_my_saved_tracks(authorization = authorization_code)
 
 access_token <- get_spotify_access_token() # takes ID and SECRET, sends to Spotify and receives an access token
@@ -38,7 +42,7 @@ access_token <- get_spotify_access_token() # takes ID and SECRET, sends to Spoti
 
 You can use get_my_saved_tracks() to request all your liked tracks. It would be good if you had at least 150-200 liked tracks so the model has enough data to work with. If you don't have enough liked tracks, you can instead use get_my_recently_played(), and in that case grab at least 500 recently played tracks if you can.
 
-```{r}
+```{r, include = FALSE, eval = FALSE}
 # get top 50 tracks
 top_songs <- spotifyr::get_my_top_artists_or_tracks(type = "tracks", 
                                        authorization = authorization_code, 
@@ -49,7 +53,7 @@ top_songs <- spotifyr::get_my_top_artists_or_tracks(type = "tracks",
 op_music <- read_csv(here("labs", "data", "spotify_audio_features_op.csv"))
 ```
 
-```{r}
+```{r, include = FALSE, eval = FALSE}
 # create empty dataframe to store songs
 charlie_music <- data.frame()
 
@@ -104,7 +108,8 @@ oksana <- read_csv(here("labs", "data", "spotify_audio_features_op.csv")) %>%
 
 # bind the dataframes together, select variables of interest
 combined_music <- rbind(charlie, oksana) %>% 
-  select(-c(type, id, uri, track_href, analysis_url))
+  select(-c(type, id, uri, track_href, analysis_url, track_name)) %>% 
+  mutate(owner = as.factor(owner))
 
 ## exploratory visualizations -----
 ```
@@ -131,25 +136,97 @@ music_train <- training(music_split)
 music_test <- testing(music_split)
 
 # specify our recipe
-# different recipe for k-nearest neighbors versus the others?
-# what to do about song name (character)?
-knn_rec <- recipe(owner ~ ., data = music_train) %>% 
+recipe <- recipe(owner ~ ., data = music_train) %>% 
   step_normalize(all_numeric_predictors()) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
   prep()
 
-baked_train <- bake(knn_rec, music_train)
 ```
 
 #### K-nearest neighbor
 
 ```{r}
+# define a nearest neighbors model set to tune the number of neighbors
+knn_tune <- nearest_neighbor(neighbors = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("kknn")
+
+# set workflow with our recipe
+workflow_tuned <- workflow() %>% 
+  add_model(knn_tune) %>% 
+  add_recipe(recipe)
+
+# use 5 folds cv
+cv_folds <- vfold_cv(music_train, v = 5)
+
+# use a tune grid to create different models
+res_tune <- workflow_tuned %>% 
+  tune_grid(
+    resamples = cv_folds,
+    grid = 8
+  )
+
+# select best model from the tuned results, 
+knn_best <- finalize_workflow(workflow_tuned,
+                              select_best(res_tune, metric = "roc_auc"))
+
+# fit our best model to our training data
+knn_best_fit <- fit(knn_best, music_train)
+
+# get predictions using our test set and bind to the dataset
+knn_predict <- predict(knn_best_fit, music_test) %>% 
+  bind_cols(music_test)
+
+# assess accuracy of our model
+accuracy(knn_predict,
+         truth = owner,
+         estimate = .pred_class)
 
 ```
 
 2.  decision tree (Week 5)
 
 ```{r}
+# specify a decision tree and set to tune
+dt_spec <- decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()
+) %>% 
+  set_engine("rpart") %>% 
+  set_mode("classification")
 
+# set tune grid 
+dt_grid <- grid_regular(cost_complexity(), 
+                          tree_depth(), 
+                          min_n(), 
+                          levels = 5)
+
+# set our workflow with our recipe and decision tree tune specifiction
+dt_workflow <- workflow() %>% 
+  add_recipe(recipe) %>% 
+  add_model(dt_spec)
+
+# use cross folds validation to tune our models
+doParallel::registerDoParallel()
+
+dt_res <- tune_grid(
+  dt_workflow,
+  resamples = cv_folds,
+  grid = dt_grid,
+  metrics = metric_set(accuracy)
+)
+
+# find our best model
+dt_final <- finalize_workflow(dt_workflow,
+                              select_best(dt_res))
+
+# fit our best model
+dt_best <- last_fit(dt_final,
+                    music_split)
+
+# show our best model testing accuracy
+dt_best$.metrics
 ```
 
 3.  bagged tree (Week 6)
@@ -157,7 +234,47 @@ baked_train <- bake(knn_rec, music_train)
     -   Use the "times =" argument when setting the engine during model specification to specify the number of trees. The rule of thumb is that 50-500 trees is usually sufficient. The bottom of that range should be sufficient here.
 
 ```{r}
+# specify a bagged tree to tune
+bag_spec <- bag_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()
+) %>% 
+  set_engine("rpart",
+             times = 75) %>% 
+  set_mode("classification")
 
+# set tune grid
+bag_grid <- grid_regular(cost_complexity(),
+                         tree_depth(),
+                         min_n(),
+                         levels = 5)
+
+# specify our tuned workflow
+bag_wf_tune <- workflow() %>% 
+  add_recipe(recipe) %>% 
+  add_model(bag_spec)
+
+# use k-folds cv to tune our model
+doParallel::registerDoParallel()
+
+bag_res <- tune_grid(
+  bag_wf_tune,
+  resamples = cv_folds,
+  grid = bag_grid,
+  metrics = metric_set(accuracy)
+)
+
+# find the best model
+bag_tree_final <- finalize_workflow(bag_wf_tune,
+                                    select_best(bag_res))
+
+# fit our best model to our data
+bag_tree_fit <- last_fit(bag_tree_final,
+                         music_split)
+
+# view the accuracy of our model
+bag_tree_fit$.metrics
 ```
 
 4.  random forest (Week 6)
@@ -165,7 +282,40 @@ baked_train <- bake(knn_rec, music_train)
     -   m_try() is the new hyperparameter of interest for this type of model. Make sure to include it in your tuning process
 
 ```{r}
+# specify our random forest model, set to tune hyperparameters
+rf_spec <- rand_forest(mtry = tune(),
+                       trees = tune()) %>% 
+  set_engine("ranger") %>% 
+  set_mode("classification")
 
+# create a workflow with our recipe
+rf_wf <- workflow() %>% 
+  add_recipe(recipe) %>% 
+  add_model(rf_spec)
+
+# use k-folds cv to tune our model
+rf_tune <- rf_wf %>% 
+  tune_grid(
+    resamples = cv_folds,
+    metrics = metric_set(roc_auc),
+    grid = 10
+  )
+
+# select our best model
+rf_final <- finalize_workflow(rf_wf,
+                              select_best(rf_tune))
+
+# fit best model to our data
+rf_best_fit <- fit(rf_final, music_train)
+
+# fit predictions on our testing data
+rf_preds <- predict(rf_best_fit, music_test) %>% 
+  bind_cols(music_test)
+
+# assess accuracy of our random forest model
+accuracy(rf_preds, 
+         truth = owner,
+         estimate = .pred_class)
 ```
 
 

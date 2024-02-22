@@ -34,6 +34,8 @@ set.seed(808)
 churn_split <- initial_split(churn)
 churn_test <- testing(churn_split)
 churn_train <- training(churn_split)
+
+str(churn_train)
 ```
 
 We need to create a recipe and do the preprocessing by dummy coding the nominal variables and standardizing the numeric variables.
