@@ -1,0 +1,138 @@
+---
+title: "Lab 8"
+author: "Charlie Curtin"
+date: "2024-03-06"
+output: html_document
+---
+
+## Forest Cover Classification with SVM
+
+In this week's lab we are exploring the use of Support Vector Machines for multi-class classification. Specifically, you will be using cartographic variables to predict forest cover type (7 types).
+
+Natural resource managers responsible for developing ecosystem management strategies require basic descriptive information including inventory data like forest cover type for forested lands to support their decision-making processes. However, managers generally do not have this type of data for in-holdings or neighboring lands that are outside their immediate jurisdiction. One method of obtaining this information is through the use of predictive models.
+
+You task is build both an SVM and a random forest model and compare their performance on accuracy and computation time.
+
+1.  The data is available here: <https://ucsb.box.com/s/ai5ost029enlguqyyn04bnlfaqmp8kn4>
+
+```{r, warning = FALSE, message = FALSE, include = FALSE}
+# load required packages
+library(tidymodels)
+library(tidyverse)
+library(kernlab)
+library(here)
+```
+
+```{r, warning = FALSE, message = FALSE}
+# read in forest cover data
+forest <- read_csv(here("labs", "data", "covtype_sample.csv")) %>% 
+  # convert our outcome variable to a factor
+  mutate(Cover_Type = as.factor(Cover_Type))
+```
+
+Explore the data.
+
+```{r, eval = FALSE}
+str(forest)
+
+ggplot(data = forest, aes(x = Cover_Type)) +
+  geom_bar()
+```
+
+
+-   What kinds of features are we working with?
+  
+  We have a number of continuous variables describing various topological attributes of different patches of forest. We also have a few one-hot encoded categorical variables for soil type and whether the patch is in a particular National Forest. Our outcome variable is a categorical outcome with 7 different forest cover types.
+
+-   Does anything stand out that will affect you modeling choices?
+
+When we plot a histogram of our outcome variable, we see that cover type is right-skewed, with many more observations falling into the first two forest cover types than the others. This indicates that we might want to make some sort of transformation, potentially a log transformation, when we specify our recipe.
+
+2.  Create the recipe and carry out any necessary preprocessing. Can you use the same recipe for both models?
+
+```{r}
+# split data into training and testing sets
+forest_split <- initial_split(forest)
+
+forest_train <- training(forest_split)
+
+forest_test <- testing(forest_split)
+
+# specify a recipe for our models
+rec <- recipe(Cover_Type ~ ., data = forest) %>% 
+  # normalize our numeric predictors
+  step_center(all_numeric_predictors()) %>% 
+  step_scale(all_numeric_predictors())
+
+# create folds for cross-validation
+folds <- vfold_cv(forest_train, v = 5)
+```
+
+- We can use the same recipe for both models, with the only necessary preprocessing being normalizing our numeric predictors.
+
+3.  Create the folds for cross-validation.
+
+4.  Tune the models. Choose appropriate parameters and grids. If the computational costs of tuning given your strategy are prohibitive, how might you work around this?
+
+```{r}
+## tune a support vector machine model
+# define a svm model
+svm_spec <- svm_poly(degree = 1, 
+                     cost = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("kernlab")
+
+# bundle our model and recipe into a workflow
+svm_wf <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(svm_spec)
+
+# other workflow
+svm_wf_linear <- workflow() %>%
+  add_model(svm_spec) %>%
+  set_args(cost_tune())) %>%
+  add_formula(formula = Cover_Type ~ ., x = svm_wf)
+```
+```{r}
+## tuning a random forest model
+# define a random forest model
+rf_spec <- rand_forest(mtry = tune(),
+                       trees = tune()) %>% 
+  set_engine("ranger") %>% 
+  set_mode("classification")
+
+# create a workflow with our recipe
+rf_wf <- workflow() %>% 
+  add_recipe(rec) %>% 
+  add_model(rf_spec)
+
+# use k-folds cv to tune our model
+rf_tune <- rf_wf %>% 
+  tune_grid(
+    resamples = folds,
+    metrics = metric_set(roc_auc),
+    grid = 10
+  )
+
+# select our best random forest model
+rf_final <- finalize_workflow(rf_wf,
+                              select_best(rf_tune))
+
+# fit best model to our data
+rf_best_fit <- fit(rf_final, forest_train)
+
+# fit predictions on our testing data
+rf_preds <- predict(rf_best_fit, forest_test) %>% 
+  bind_cols(forest_test)
+
+# assess accuracy of our random forest model
+accuracy(rf_preds, 
+         truth = owner,
+         estimate = .pred_class)
+```
+
+
+5.  Conduct final predictions for both models and compare their prediction performances and computation costs from part 4.
+
+-   Which type of model do you think is better for this task?
+-   Why do you speculate this is the case?

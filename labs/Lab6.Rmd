@@ -2,7 +2,9 @@
 title: "Lab6"
 author: "Charlie Curtin"
 date: "2023-03-01"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ## Case Study: Eel Distribution Modeling
@@ -21,15 +23,15 @@ library(here)
 library(parsnip)
 library(caret)
 library(tidymodels)
+library(vip)
 ```
 
 
 ```{r, message = FALSE, warning = FALSE}
 # read in the data
 eel_model <- read_csv(here("labs", "data", "eel.model.data.csv")) %>% 
-  mutate(Angaus = as.factor(Angaus))
-
-eel_eval <- read_csv(here("labs", "data", "eel.eval.data.csv"))
+  mutate(Angaus = as.factor(Angaus)) %>% 
+  select(-Site)
 ```
 
 
@@ -37,7 +39,7 @@ eel_eval <- read_csv(here("labs", "data", "eel.eval.data.csv"))
 
 Split the model data (eel.model.data.csv) into a training and test set, stratified by outcome score (Angaus). Use 10-fold CV to resample the training set.
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 set.seed(345)
 
 # split the model data
@@ -54,13 +56,12 @@ cv_folds <- vfold_cv(eel_train, v = 10)
 
 Create a recipe to prepare your data for the XGBoost model
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 # specify a recipe
 eel_rec <- recipe(Angaus ~ ., data = eel_train) %>% 
   # turn nominal variables into dummy variables
   step_dummy(all_nominal_predictors(), one_hot = TRUE) %>% 
   step_normalize(all_numeric_predictors())
-  
 ```
 
 
@@ -78,7 +79,7 @@ Following the XGBoost tuning strategy outlined in lecture, first we conduct tuni
 
 3.  Show the performance of the best models and the estimates for the learning rate parameter values associated with each.
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 # specify an xgboost model with learn_rate set to tune
 xgb_spec <- boost_tree(learn_rate = tune()) %>% 
   set_mode("classification") %>% 
@@ -114,7 +115,7 @@ learn_rate <- select_best(xgb_tune, metric = "accuracy")$learn_rate
 
 3.  Show the performance of the best models and the estimates for the tree parameter values associated with each.
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 # create a new model specification to tune the tree parameter
 xgb_spec2 <- boost_tree(learn_rate = learn_rate,
                        trees = tune()) %>% 
@@ -152,7 +153,7 @@ trees <- select_best(xgb_tune2, metric = "accuracy")$trees
 
 3.  Show the performance of the best models and the estimates for the tree parameter values associated with each.
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 # create a new model specification to tune the tree parameter
 xgb_spec3 <- boost_tree(learn_rate = learn_rate,
                        trees = trees,
@@ -179,6 +180,11 @@ system.time(
 
 # show top 3 models by accuracy
 show_best(xgb_tune3, metric = "accuracy", n = 3)
+
+mtry <- select_best(xgb_tune3, metric = "accuracy")$mtry
+
+sample_size <- select_best(xgb_tune3, metric = "accuracy")$sample_size
+
 ```
 
 
@@ -186,7 +192,7 @@ show_best(xgb_tune3, metric = "accuracy", n = 3)
 
 1.  How well did your model perform? What types of errors did it make?
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 # finalize our workflow with our tuned parameters
 xgb_final <- finalize_workflow(xgb_wf3,
                               select_best(xgb_tune3, metric = "accuracy"))
@@ -195,19 +201,19 @@ xgb_final <- finalize_workflow(xgb_wf3,
 fit_xgb = fit(xgb_final, eel_train)
 
 # make predictions on the test set
-predict_xgb = predict(fit_xgb, eel_test) %>% #get testing predictions
+predict_xgb = predict(fit_xgb, eel_test) %>% # get testing predictions
   bind_cols(eel_test) %>%   #bind to testing column
-  mutate(DSDam = as.factor(DSDam))
+  mutate(Angaus = as.factor(Angaus))
 
 # assess the accuracy of our final model 
-accuracy(predict_xgb, truth = DSDam, estimate = .pred_class)
+accuracy(predict_xgb, truth = Angaus, estimate = .pred_class)
 ```
-- Our model correctly predicts the presence or absence of the eel species with 72% accuracy.
+- Our model correctly predicts the presence or absence of the eel species with 84% accuracy.
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
 # visualize the confusion matrix of our model
 predict_xgb %>% 
-  conf_mat(truth = DSDam, estimate = .pred_class) %>% # create confusion matrix
+  conf_mat(truth = Angaus, estimate = .pred_class) %>% # create confusion matrix
   autoplot(type = "heatmap") + # plot confusion matrix with heatmap
   theme_bw() + #change theme
   theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
@@ -215,7 +221,7 @@ predict_xgb %>%
   labs(title = "XGBoost Model")
 ```
 
-- By visualizing the confusion matrix, we can see that our model has an almost equal rate of false positives and false negatives. 
+- By visualizing the confusion matrix, we can see that our model has made 11 false positives and 29 false negatives.
 
 ## Fit your model the evaluation data and compare performance
 
@@ -228,7 +234,23 @@ predict_xgb %>%
 -   Use {vip} to compare variable importance
 -   What do your variable importance results tell you about the distribution of this eel species?
 
-```{r}
+```{r, message = FALSE, warning = FALSE}
+# read in the other dataset
+eel_eval <- read_csv(here("labs", "data", "eel.eval.data.csv")) %>% 
+  mutate(Angaus = as.factor(Angaus_obs)) %>% 
+  select(-Angaus_obs)
 
+# make predictions on the new data
+predict_xgb_eval = predict(fit_xgb, eel_eval) %>% # get testing predictions
+  bind_cols(eel_eval)
+
+# assess the accuracy
+accuracy(predict_xgb_eval, truth = Angaus, estimate = .pred_class)
+```
+- Our model predicts fish species occurrence on this new data with almost 82% accuracy.
+
+```{r}
+vip(fit_xgb)
 ```
 
+- Our variable importance plot tells us that "DSDist", which is distance to coast, is the most important variable in the data for predicting occurrence of a fish.
