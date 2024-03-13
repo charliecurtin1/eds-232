@@ -75,7 +75,7 @@ svm_linear_fit %>%
 ```{r tune}
 #As usual we want to tune our hyperparameter values
 svm_linear_wf <- workflow() %>%
-  add_model(svm_linear_spec %>%
+  add_model(svm_linear_spec) %>%
   set_args(cost_tune())) %>%
   add_formula(y~.)
 
@@ -173,7 +173,7 @@ y= factor(rep(c(1,2), c(150,50)))
 ```
 
 ```{r}
-#Examine model performance via confustion matrix
+# examine model performance with a confusion matrix
 augment(svm_rbf_fit, new_data = sim_data2_test) %>%
   conf_mat(truth = y, estimate = .pred_class)
 ```
